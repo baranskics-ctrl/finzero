@@ -258,7 +258,12 @@ html,body{height:100%;background:var(--bg);color:var(--txt);font-family:-apple-s
           </select>
         </div>
       </div>
-      <div style="font-size:12px;color:var(--txt2)"><i class="ti ti-info-circle" style="font-size:13px;vertical-align:-2px"></i> Receitas, gastos e parcelas puxados automaticamente.</div>
+      <div class="form-row-2" style="margin-top:4px">
+        <div class="form-group"><label>Gastos avulsos estimados/mês (R$)</label><input type="number" id="proj-avulso" placeholder="Ex: 400" step="10" oninput="recalcProj();saveData()"></div>
+        <div class="form-group"><label>Receitas avulsas estimadas/mês (R$)</label><input type="number" id="proj-avulso-rec" placeholder="Ex: 200" step="10" oninput="recalcProj();saveData()"></div>
+      </div>
+      <div style="font-size:12px;color:var(--txt2)"><i class="ti ti-info-circle" style="font-size:13px;vertical-align:-2px"></i> Receitas, gastos e parcelas fixos puxados automaticamente. Avulsos estimados somam em cada mês futuro.</div>
+      <div id="proj-saldo-base" style="display:none;font-size:12px;color:var(--yellow);margin-top:6px;background:var(--yellow-bg);border-radius:var(--radius-sm);padding:6px 10px;border:1px solid rgba(251,191,36,.25)"></div>
     </div>
     <div class="scen-row">
       <button class="scen-btn on" id="sc-real" onclick="setScen('real')">Real</button>
@@ -441,7 +446,7 @@ const mNames=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Ago
 // ─── LOCALSTORAGE ─────────────────────────────────────────────────────
 function saveData(){
   try{
-    const d={lancamentos,receitas,gastos,parcelas,uid,projSaldo:document.getElementById('proj-saldo').value,projMeses:document.getElementById('proj-meses').value};
+    const d={lancamentos,receitas,gastos,parcelas,uid,projSaldo:document.getElementById('proj-saldo').value,projMeses:document.getElementById('proj-meses').value,projAvulso:document.getElementById('proj-avulso').value,projAvulsoRec:document.getElementById('proj-avulso-rec').value};
     localStorage.setItem('finzero_v1',JSON.stringify(d));
     showSaved();
   }catch(e){}
@@ -458,6 +463,8 @@ function loadData(){
     uid=d.uid||1;
     if(d.projSaldo)document.getElementById('proj-saldo').value=d.projSaldo;
     if(d.projMeses)document.getElementById('proj-meses').value=d.projMeses;
+    if(d.projAvulso)document.getElementById('proj-avulso').value=d.projAvulso;
+    if(d.projAvulsoRec)document.getElementById('proj-avulso-rec').value=d.projAvulsoRec;
   }catch(e){}
 }
 let saveTimer=null;
@@ -695,22 +702,42 @@ function setScen(s){
   scen=s;['real','otim','pess'].forEach(x=>document.getElementById('sc-'+x).classList.toggle('on',x===s));
   recalcProj();
 }
+function calcSaldoLancamentos(){
+  // soma todos os lançamentos avulsos cadastrados
+  return lancamentos.reduce((s,l)=>s+(l.tipo==='receita'?l.val:-l.val),0);
+}
 function recalcProj(){
-  const saldoInicial=parseFloat(document.getElementById('proj-saldo').value)||0;
+  const saldoManual=parseFloat(document.getElementById('proj-saldo').value)||0;
+  // saldo inicial = valor digitado + saldo real dos lançamentos avulsos
+  const saldoLanc=calcSaldoLancamentos();
+  const saldoInicial=parseFloat((saldoManual+saldoLanc).toFixed(2));
+  // mostra o saldo base calculado
+  const baseEl=document.getElementById('proj-saldo-base');
+  if(baseEl){
+    if(saldoLanc!==0){
+      baseEl.textContent='Lançamentos: '+(saldoLanc>=0?'+':'')+fmt(saldoLanc)+' → Base: '+fmt(saldoInicial);
+      baseEl.style.display='block';
+    } else {
+      baseEl.style.display='none';
+    }
+  }
   const nM=parseInt(document.getElementById('proj-meses').value)||12;
   const mult=scen==='otim'?1.2:scen==='pess'?0.8:1;
   const expMult=scen==='pess'?1.2:scen==='otim'?0.9:1;
   const months=[];let saldo=saldoInicial;
   for(let i=0;i<nM;i++){
     const ms=monthStr(i);const items=getItemsForMonth(ms);
-    const entrada=items.filter(it=>it.kind==='receita').reduce((s,it)=>s+it.val,0)*mult;
-    const saida=items.filter(it=>it.kind!=='receita').reduce((s,it)=>s+it.val,0)*expMult;
+    // gastos e receitas avulsos estimados por mês (só meses futuros, i>0)
+    const avulsoGasto=i>0?(parseFloat(document.getElementById('proj-avulso').value)||0):0;
+    const avulsoRec=i>0?(parseFloat(document.getElementById('proj-avulso-rec').value)||0):0;
+    const entrada=(items.filter(it=>it.kind==='receita').reduce((s,it)=>s+it.val,0)+avulsoRec)*mult;
+    const saida=(items.filter(it=>it.kind!=='receita').reduce((s,it)=>s+it.val,0)+avulsoGasto)*expMult;
     saldo=parseFloat((saldo+entrada-saida).toFixed(2));
     months.push({label:monthLabel(i),ms,entrada,saida,sobra:entrada-saida,saldo,i});
   }
   const ultimo=months[months.length-1];
   const avgSobra=months.reduce((s,m)=>s+m.sobra,0)/nM;
-  const mesPos=saldoInicial<0?months.findIndex(m=>m.saldo>=0):-1;
+  const mesPos=saldoInicial<0?months.findIndex(m=>m.saldo>=0):months.findIndex(m=>m.saldo<0)<0?-1:-1;
   const totalR=receitas.filter(r=>r.recorr==='mensal').reduce((s,r)=>s+r.val,0);
   const totalP=parcelas.reduce((s,p)=>s+p.val,0);
   const totalGF=gastos.filter(g=>g.recorr==='mensal').reduce((s,g)=>s+g.val,0);
