@@ -703,8 +703,14 @@ function setScen(s){
   recalcProj();
 }
 function calcSaldoLancamentos(){
-  // soma todos os lançamentos avulsos cadastrados
-  return lancamentos.reduce((s,l)=>s+(l.tipo==='receita'?l.val:-l.val),0);
+  // soma apenas lançamentos com data até hoje (já realizados)
+  const hoje=new Date().toISOString().split('T')[0];
+  return lancamentos.filter(l=>l.data<=hoje).reduce((s,l)=>s+(l.tipo==='receita'?l.val:-l.val),0);
+}
+function getLancamentosDoMes(ms){
+  // lançamentos avulsos futuros do mês específico entram na projeção daquele mês
+  const hoje=new Date().toISOString().split('T')[0];
+  return lancamentos.filter(l=>l.data>hoje&&l.data.startsWith(ms));
 }
 function recalcProj(){
   const saldoManual=parseFloat(document.getElementById('proj-saldo').value)||0;
@@ -730,8 +736,12 @@ function recalcProj(){
     // gastos e receitas avulsos estimados por mês (só meses futuros, i>0)
     const avulsoGasto=i>0?(parseFloat(document.getElementById('proj-avulso').value)||0):0;
     const avulsoRec=i>0?(parseFloat(document.getElementById('proj-avulso-rec').value)||0):0;
-    const entrada=(items.filter(it=>it.kind==='receita').reduce((s,it)=>s+it.val,0)+avulsoRec)*mult;
-    const saida=(items.filter(it=>it.kind!=='receita').reduce((s,it)=>s+it.val,0)+avulsoGasto)*expMult;
+    // lançamentos avulsos futuros cadastrados para este mês específico
+    const lancFuturos=getLancamentosDoMes(ms);
+    const lancFutRec=lancFuturos.filter(l=>l.tipo==='receita').reduce((s,l)=>s+l.val,0);
+    const lancFutDesp=lancFuturos.filter(l=>l.tipo==='despesa').reduce((s,l)=>s+l.val,0);
+    const entrada=(items.filter(it=>it.kind==='receita').reduce((s,it)=>s+it.val,0)+avulsoRec+lancFutRec)*mult;
+    const saida=(items.filter(it=>it.kind!=='receita').reduce((s,it)=>s+it.val,0)+avulsoGasto+lancFutDesp)*expMult;
     saldo=parseFloat((saldo+entrada-saida).toFixed(2));
     months.push({label:monthLabel(i),ms,entrada,saida,sobra:entrada-saida,saldo,i});
   }
